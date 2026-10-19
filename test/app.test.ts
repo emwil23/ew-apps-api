@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createApp, type Deps } from '../src/app.js'
 import { createIpLimiter } from '../src/ipLimit.js'
+import { SourceUnavailable } from '../src/photos.js'
 
 const validBody = { goal: 'Launch my portfolio site' }
 
@@ -18,6 +19,12 @@ function setup(overrides: Partial<Deps> = {}) {
       yield '{"title":"Pick a domain","estimateMin":15}\n'
       yield '{"title":"Write the about page","estimateMin":60}\n'
     }),
+    fetchImage: vi.fn(() => Promise.resolve({ mimeType: 'image/jpeg', data: 'AAAA' })),
+    photos: {
+      search: vi.fn(() => Promise.resolve({ photos: [], hasMore: false })),
+      trackDownload: vi.fn(() => Promise.resolve()),
+    },
+    hitPhotoIpLimit: () => true,
     ...overrides,
   }
   const app = createApp(deps)
@@ -126,6 +133,93 @@ describe('POST /api/ai/:app/:action', () => {
       (await call({ tasks, now: '25:00', dayEnd: '17:30' }, {}, '/api/ai/taskpilot/plan-day'))
         .status,
     ).toBe(400)
+  })
+})
+
+describe('pixe AI actions', () => {
+  const photo = 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?w=1080'
+
+  it('validates every pixe action input', async () => {
+    const { call } = setup()
+    const bodies: Record<string, unknown> = {
+      queries: { vibe: 'cozy autumn café brand, film grain, warm' },
+      describe: { imageUrl: photo, sourceAlt: 'a cup of coffee' },
+      brief: { title: 'Autumn café', images: [{ alt: 'latte art' }], palette: ['#7a4b2a'] },
+      fonts: { palette: ['#7a4b2a', '#f2e6d0'], tags: ['warm'] },
+    }
+    for (const [action, body] of Object.entries(bodies)) {
+      expect((await call(body, {}, `/api/ai/pixe/${action}`)).status, action).toBe(200)
+    }
+    expect((await call({ palette: ['red'] }, {}, '/api/ai/pixe/fonts')).status).toBe(400)
+  })
+
+  it('sends the stock photo to the model, and refuses any other URL', async () => {
+    const { call, deps } = setup()
+    await call({ imageUrl: photo }, {}, '/api/ai/pixe/describe')
+    expect(deps.fetchImage).toHaveBeenCalledWith(photo)
+    expect(vi.mocked(deps.generate).mock.calls[0]?.[0].images).toHaveLength(1)
+
+    for (const imageUrl of [
+      'http://images.unsplash.com/x.jpg',
+      'https://evil.example/x.jpg',
+      'https://169.254.169.254/latest/meta-data',
+    ]) {
+      expect((await call({ imageUrl }, {}, '/api/ai/pixe/describe')).status, imageUrl).toBe(400)
+    }
+  })
+
+  it('does not charge quota when the photo cannot be fetched', async () => {
+    const { call, deps } = setup({ fetchImage: () => Promise.reject(new Error('404')) })
+    expect((await call({ imageUrl: photo }, {}, '/api/ai/pixe/describe')).status).toBe(422)
+    expect(deps.useQuota).not.toHaveBeenCalled()
+  })
+})
+
+describe('/api/photos', () => {
+  it('searches one source with validated filters, no sign-in needed', async () => {
+    const { deps } = setup()
+    const app = createApp(deps)
+    const res = await app.request('/api/photos/pexels/search?q=autumn+cafe&orientation=portrait')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toContain('max-age')
+    expect(deps.photos.search).toHaveBeenCalledWith('pexels', {
+      q: 'autumn cafe',
+      page: 1,
+      orientation: 'portrait',
+      license: 'any',
+    })
+    expect((await app.request('/api/photos/flickr/search?q=x')).status).toBe(404)
+    expect((await app.request('/api/photos/unsplash/search?q=')).status).toBe(400)
+    expect((await app.request('/api/photos/unsplash/search?q=x&color=beige')).status).toBe(400)
+  })
+
+  it('answers 503 for a source without a key, and 429 over the IP limit', async () => {
+    const noKey = setup({
+      photos: {
+        search: () => Promise.reject(new SourceUnavailable('unsplash')),
+        trackDownload: vi.fn(),
+      },
+    })
+    const path = '/api/photos/unsplash/search?q=x'
+    expect((await createApp(noKey.deps).request(path)).status).toBe(503)
+    const limited = setup({ hitPhotoIpLimit: () => false })
+    expect((await createApp(limited.deps).request(path)).status).toBe(429)
+  })
+
+  it('tracks Unsplash downloads only for Unsplash download URLs', async () => {
+    const { deps } = setup()
+    const app = createApp(deps)
+    const post = (downloadLocation: string) =>
+      app.request('/api/photos/unsplash/download', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ downloadLocation }),
+      })
+    const good = 'https://api.unsplash.com/photos/Dwu85P9SOIk/download?ixid=M3w1'
+    expect((await post(good)).status).toBe(204)
+    expect(deps.photos.trackDownload).toHaveBeenCalledWith(good)
+    expect((await post('https://evil.example/photos/x/download')).status).toBe(400)
+    expect(deps.photos.trackDownload).toHaveBeenCalledTimes(1)
   })
 })
 

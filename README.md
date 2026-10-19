@@ -58,6 +58,8 @@ sequenceDiagram
 - **The region block is on the server.** The Gemini free tier can't serve the EEA, UK or Switzerland, so the API looks up the country of the IP that Heroku's router saw (the last `X-Forwarded-For` entry; earlier ones can be forged).
 - **The quota is one atomic SQL statement.** `use_ai_quota` upserts and returns the count, so two parallel calls can't both slip under the limit.
 - **The IP limit is in memory.** One dyno means one process. If it ever scales out, move it to Postgres.
+- **Stock photos go through the server.** `GET /api/photos/:source/search` (Unsplash, Pexels, Openverse) keeps the keys off the client and returns one photo shape for all three. Results are cached for an hour in memory: Pexels allows 200 calls an hour and anonymous Openverse 200 a day, shared by every user. Image URLs still point at each source's CDN, as Unsplash requires, and `POST /api/photos/unsplash/download` reports exports to Unsplash.
+- **The AI only sees public stock photos.** Pixe's `describe` action takes a photo URL, which must be on `images.unsplash.com`, `images.pexels.com` or Openverse's thumbnail host over https; the server fetches a 512px copy (no redirects) and sends it inline. Users' own uploads never reach the free-tier model.
 - **Daily ping.** Supabase pauses idle free projects, so the server calls `ping()` once a day.
 
 ## Run it
@@ -79,6 +81,7 @@ Deploy: `git push heroku main`, with the `.env` values set as Heroku config vars
 | `src/app.ts`           | The route, its guards and streaming (pure, takes its dependencies)        |
 | `src/server.ts`        | Real dependencies: Gemini, Supabase, JWKS, geo-IP; env checks; daily ping |
 | `src/apps/`            | One file of prompt templates and input schemas per app                    |
+| `src/photos.ts`        | Photo search per source, the shared photo shape, cache, image fetching    |
 | `supabase/migrations/` | The quota table and RPCs                                                  |
 | `test/`                | Route tests with fake dependencies                                        |
 

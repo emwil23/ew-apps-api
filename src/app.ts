@@ -4,6 +4,16 @@ import { cors } from 'hono/cors'
 import { secureHeaders } from 'hono/secure-headers'
 import { streamText } from 'hono/streaming'
 import { apps } from './apps/index.js'
+import {
+  searchQuery,
+  SOURCES,
+  SourceUnavailable,
+  isUnsplashDownloadLocation,
+  type PhotoPage,
+  type SearchQuery,
+  type Source,
+} from './photos.js'
+import { z } from 'zod'
 
 export interface User {
   id: string
@@ -25,9 +35,18 @@ export interface Deps {
   generate: (req: {
     system: string
     prompt: string
+    /** Public stock photos only, never user uploads (free-tier prompts may be read by Google). */
+    images?: { mimeType: string; data: string }[] | undefined
     maxOutputTokens: number
     signal: AbortSignal
   }) => AsyncIterable<string>
+  fetchImage: (url: string) => Promise<{ mimeType: string; data: string }>
+  photos: {
+    search: (source: Source, q: SearchQuery) => Promise<PhotoPage>
+    trackDownload: (downloadLocation: string) => Promise<void>
+  }
+  /** A looser per-IP limit for photo search, which needs no sign-in. */
+  hitPhotoIpLimit: (ip: string) => boolean
 }
 
 // The Gemini free tier may not be used to serve people in the EEA, the UK or Switzerland.
@@ -86,6 +105,42 @@ export function createApp(deps: Deps) {
     return c.body(null, 204)
   })
 
+  // Stock photo search, so the Unsplash and Pexels keys stay on the server. No sign-in needed.
+  app.get('/api/photos/:source/search', async (c) => {
+    const source = SOURCES.find((s) => s === c.req.param('source'))
+    if (!source) return c.json({ error: 'unknown_source' }, 404)
+    if (!deps.hitPhotoIpLimit(clientIp(c.req.header('x-forwarded-for'))))
+      return c.json({ error: 'rate_limited' }, 429)
+    const parsed = searchQuery.safeParse(c.req.query())
+    if (!parsed.success) return c.json({ error: 'invalid_input', issues: parsed.error.issues }, 400)
+    try {
+      const page = await deps.photos.search(source, parsed.data)
+      c.header('Cache-Control', 'public, max-age=600')
+      return c.json(page)
+    } catch (err) {
+      if (err instanceof SourceUnavailable) return c.json({ error: 'source_unavailable' }, 503)
+      console.error('photo search failed', err)
+      return c.json({ error: 'upstream_failed' }, 502)
+    }
+  })
+
+  // Unsplash asks apps to report each download; the board calls this when a photo is exported.
+  app.post('/api/photos/unsplash/download', bodyLimit({ maxSize: 1024 }), async (c) => {
+    if (!deps.hitPhotoIpLimit(clientIp(c.req.header('x-forwarded-for'))))
+      return c.json({ error: 'rate_limited' }, 429)
+    const body = z
+      .object({ downloadLocation: z.string().max(300).refine(isUnsplashDownloadLocation) })
+      .safeParse(await c.req.json().catch(() => undefined))
+    if (!body.success) return c.json({ error: 'invalid_input' }, 400)
+    try {
+      await deps.photos.trackDownload(body.data.downloadLocation)
+      return c.body(null, 204)
+    } catch (err) {
+      console.error('unsplash download tracking failed', err)
+      return c.json({ error: 'upstream_failed' }, 502)
+    }
+  })
+
   app.post('/api/ai/:app/:action', bodyLimit({ maxSize: 16 * 1024 }), async (c) => {
     const action = apps[c.req.param('app')]?.[c.req.param('action')]
     if (!action) return c.json({ error: 'unknown_action' }, 404)
@@ -103,6 +158,17 @@ export function createApp(deps: Deps) {
     const parsed = action.input.safeParse(await c.req.json().catch(() => undefined))
     if (!parsed.success) return c.json({ error: 'invalid_input', issues: parsed.error.issues }, 400)
 
+    // Fetch the image before charging quota, so a dead link costs the user nothing.
+    let images: { mimeType: string; data: string }[] | undefined
+    const imageUrl = action.image?.(parsed.data)
+    if (imageUrl) {
+      try {
+        images = [await deps.fetchImage(imageUrl)]
+      } catch {
+        return c.json({ error: 'image_unavailable' }, 422)
+      }
+    }
+
     const quota = await deps.useQuota(user.id, c.req.param('app'))
     if (!quota.allowed) return c.json({ error: 'quota_exceeded' }, 429)
 
@@ -119,6 +185,7 @@ export function createApp(deps: Deps) {
         const chunks = deps.generate({
           system: action.system,
           prompt: action.prompt(parsed.data),
+          images,
           maxOutputTokens: action.maxOutputTokens,
           signal,
         })

@@ -8,6 +8,8 @@ export interface AiAction<S extends z.ZodType = z.ZodType> {
   maxOutputTokens: number
   system: string
   prompt: (input: z.infer<S>) => string
+  /** A public stock photo URL from the input, fetched by the server and sent to the model with the prompt. */
+  image?: (input: z.infer<S>) => string
 }
 
 export const defineAction = <S extends z.ZodType>(action: AiAction<S>): AiAction<S> => action

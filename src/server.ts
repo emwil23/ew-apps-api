@@ -6,6 +6,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose'
 import { z } from 'zod'
 import { createApp } from './app.js'
 import { createIpLimiter } from './ipLimit.js'
+import { createPhotoSearch, fetchStockImage } from './photos.js'
 
 const env = z
   .object({
@@ -19,6 +20,10 @@ const env = z
     ALLOWED_ORIGINS: z.string().transform((s) => s.split(',').map((o) => o.trim())),
     AI_DAILY_QUOTA: z.coerce.number().int().positive().default(30),
     AI_IP_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(20),
+    // Optional: without a key that source answers 503 and the apps hide it.
+    UNSPLASH_ACCESS_KEY: z.string().optional(),
+    PEXELS_API_KEY: z.string().optional(),
+    PHOTO_IP_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(60),
   })
   .parse(process.env)
 
@@ -27,6 +32,8 @@ const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false },
 })
 const jwks = createRemoteJWKSet(new URL(`${env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`))
+
+const photos = createPhotoSearch({ unsplash: env.UNSPLASH_ACCESS_KEY, pexels: env.PEXELS_API_KEY })
 
 const app = createApp({
   allowedOrigins: env.ALLOWED_ORIGINS,
@@ -77,15 +84,23 @@ const app = createApp({
 
   countryOf: (ip) => geoip.lookup(ip)?.country,
   hitIpLimit: createIpLimiter(env.AI_IP_LIMIT_PER_MINUTE, 60_000),
+  hitPhotoIpLimit: createIpLimiter(env.PHOTO_IP_LIMIT_PER_MINUTE, 60_000),
+  photos,
+  fetchImage: (url) => fetchStockImage(url),
 
-  async *generate({ system, prompt, maxOutputTokens, signal }) {
+  async *generate({ system, prompt, images = [], maxOutputTokens, signal }) {
     const models = [env.GEMINI_MODEL, env.GEMINI_FALLBACK_MODEL]
     for (const [i, model] of models.entries()) {
       let answered = false
       try {
         const stream = await gemini.models.generateContentStream({
           model,
-          contents: prompt,
+          contents: [
+            {
+              role: 'user',
+              parts: [...images.map((inlineData) => ({ inlineData })), { text: prompt }],
+            },
+          ],
           config: {
             systemInstruction: system,
             maxOutputTokens,
