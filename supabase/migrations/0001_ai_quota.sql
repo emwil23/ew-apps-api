@@ -27,6 +27,7 @@ $$;
 create or replace function public.ping()
 returns integer
 language sql
+set search_path = ''
 as $$ select 1 $$;
 
 revoke all on function public.use_ai_quota(uuid, text) from public, anon, authenticated;
