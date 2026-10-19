@@ -12,6 +12,8 @@ const env = z
     PORT: z.coerce.number().default(8787),
     GEMINI_API_KEY: z.string().min(1),
     GEMINI_MODEL: z.string().default('gemini-3.5-flash-lite'),
+    // Tried when the main model fails before answering (overloaded, rate-limited).
+    GEMINI_FALLBACK_MODEL: z.string().default('gemini-3.5-flash'),
     SUPABASE_URL: z.url(),
     SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
     ALLOWED_ORIGINS: z.string().transform((s) => s.split(',').map((o) => o.trim())),
@@ -77,12 +79,35 @@ const app = createApp({
   hitIpLimit: createIpLimiter(env.AI_IP_LIMIT_PER_MINUTE, 60_000),
 
   async *generate({ system, prompt, maxOutputTokens, signal }) {
-    const stream = await gemini.models.generateContentStream({
-      model: env.GEMINI_MODEL,
-      contents: prompt,
-      config: { systemInstruction: system, maxOutputTokens, temperature: 0.4, abortSignal: signal },
-    })
-    for await (const chunk of stream) if (chunk.text) yield chunk.text
+    const models = [env.GEMINI_MODEL, env.GEMINI_FALLBACK_MODEL]
+    for (const [i, model] of models.entries()) {
+      let answered = false
+      try {
+        const stream = await gemini.models.generateContentStream({
+          model,
+          contents: prompt,
+          config: {
+            systemInstruction: system,
+            maxOutputTokens,
+            temperature: 0.4,
+            abortSignal: signal,
+          },
+        })
+        for await (const chunk of stream) {
+          if (!chunk.text) continue
+          answered = true
+          yield chunk.text
+        }
+        return
+      } catch (err) {
+        // Only retry if nothing reached the user yet, the request wasn't cancelled, and a fallback is left.
+        if (answered || signal.aborted || i === models.length - 1) throw err
+        console.warn(
+          `gemini ${model} failed, trying ${models[i + 1] ?? ''}`,
+          String(err).slice(0, 200),
+        )
+      }
+    }
   },
 })
 

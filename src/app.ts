@@ -37,8 +37,10 @@ export const BLOCKED_COUNTRIES = new Set([
   'NL','PL','PT','RO','SK','SI','ES','SE','IS','LI','NO','GB','CH',
 ])
 
-// Heroku's router closes a request that sends nothing for 30s, so we stop the model well before.
-const AI_TIMEOUT_MS = 25_000
+// Free-tier Gemini can take 30-50s to start answering. Heroku's router needs headers within 30s (sent at
+// once) and then a byte at least every 55s, so we send a keep-alive blank line every 10s and stop at 60s.
+const AI_TIMEOUT_MS = 60_000
+const KEEP_ALIVE_MS = 10_000
 
 /** Heroku appends the real client address as the last X-Forwarded-For entry; earlier ones can be forged. */
 const clientIp = (header: string | undefined) => header?.split(',').at(-1)?.trim() ?? 'unknown'
@@ -120,7 +122,13 @@ export function createApp(deps: Deps) {
           maxOutputTokens: action.maxOutputTokens,
           signal,
         })
-        for await (const chunk of chunks) await stream.write(chunk)
+        // Blank lines are ignored by JSON Lines readers and trimmed from text replies.
+        const keepAlive = setInterval(() => void stream.write('\n'), KEEP_ALIVE_MS)
+        try {
+          for await (const chunk of chunks) await stream.write(chunk)
+        } finally {
+          clearInterval(keepAlive)
+        }
       },
       async (err, stream) => {
         console.error('ai stream failed', err)
