@@ -1,0 +1,48 @@
+{
+  "name": "ew-apps-api",
+  "version": "1.0.0",
+  "description": "Shared backend for the EW apps: one Hono server with server-side AI prompt templates, quotas and limits.",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch --env-file=.env src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/emwil23/ew-apps-api.git"
+  },
+  "author": "Emmanuel Wilson",
+  "license": "MIT",
+  "type": "module",
+  "homepage": "https://github.com/emwil23/ew-apps-api#readme",
+  "dependencies": {
+    "@google/genai": "^2.30.0",
+    "@hono/node-server": "^2.1.5",
+    "@supabase/supabase-js": "^2.118.0",
+    "geoip-country": "^5.0.202610170130",
+    "hono": "^4.13.13",
+    "jose": "^6.2.12",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.5",
+    "eslint": "^10.13.0",
+    "prettier": "^3.9.10",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0",
+    "typescript-eslint": "^8.71.2",
+    "vitest": "^5.0.5"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  },
+  "engines": {
+    "node": "24.x"
+  }
+}
