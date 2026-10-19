@@ -74,12 +74,12 @@ Deploy: `git push heroku main`, with the `.env` values set as Heroku config vars
 
 ## Where things are
 
-| Path | What |
-| --- | --- |
-| `src/app.ts` | The route, its guards and streaming (pure, takes its dependencies) |
-| `src/server.ts` | Real dependencies: Gemini, Supabase, JWKS, geo-IP; env checks; daily ping |
-| `src/apps/` | One file of prompt templates and input schemas per app |
-| `supabase/migrations/` | The quota table and RPCs |
-| `test/` | Route tests with fake dependencies |
+| Path                   | What                                                                      |
+| ---------------------- | ------------------------------------------------------------------------- |
+| `src/app.ts`           | The route, its guards and streaming (pure, takes its dependencies)        |
+| `src/server.ts`        | Real dependencies: Gemini, Supabase, JWKS, geo-IP; env checks; daily ping |
+| `src/apps/`            | One file of prompt templates and input schemas per app                    |
+| `supabase/migrations/` | The quota table and RPCs                                                  |
+| `test/`                | Route tests with fake dependencies                                        |
 
 <div align="center">Made with ♥ by EWSTUDIOS</div>

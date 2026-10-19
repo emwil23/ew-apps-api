@@ -7,7 +7,10 @@ const validBody = { goal: 'Launch my portfolio site' }
 function setup(overrides: Partial<Deps> = {}) {
   const deps: Deps = {
     allowedOrigins: ['http://localhost:5173'],
-    verifyToken: (token) => Promise.resolve(token === 'good' ? { id: 'u1', adult: true } : null),
+    verifyToken: (token) => Promise.resolve(token === 'good' ? { id: 'u1' } : null),
+    isAdult: vi.fn(() => Promise.resolve(true)),
+    confirmAdult: vi.fn(() => Promise.resolve()),
+    deleteUser: vi.fn(() => Promise.resolve()),
     useQuota: vi.fn(() => Promise.resolve({ allowed: true, remaining: 29 })),
     countryOf: () => 'US',
     hitIpLimit: () => true,
@@ -78,7 +81,7 @@ describe('POST /api/ai/:app/:action', () => {
   it('requires a valid token and an adult user', async () => {
     expect((await setup().call(validBody, { authorization: '' })).status).toBe(401)
     expect((await setup().call(validBody, { authorization: 'Bearer bad' })).status).toBe(401)
-    const minor = setup({ verifyToken: () => Promise.resolve({ id: 'u2', adult: false }) })
+    const minor = setup({ isAdult: () => Promise.resolve(false) })
     expect((await minor.call()).status).toBe(403)
   })
 
@@ -133,5 +136,43 @@ describe('createIpLimiter', () => {
     expect([hit('a'), hit('a'), hit('a'), hit('b')]).toEqual([true, true, false, true])
     t = 1000
     expect(hit('a')).toBe(true)
+  })
+})
+
+describe('/api/me', () => {
+  const req = (
+    app: ReturnType<typeof createApp>,
+    method: string,
+    path: string,
+    auth = 'Bearer good',
+  ) => app.request(path, { method, headers: auth ? { authorization: auth } : {} })
+
+  it('reports, records and deletes only for a signed-in user', async () => {
+    const deps = {
+      allowedOrigins: [],
+      verifyToken: (t: string) => Promise.resolve(t === 'good' ? { id: 'u1' } : null),
+      isAdult: vi.fn(() => Promise.resolve(false)),
+      confirmAdult: vi.fn(() => Promise.resolve()),
+      deleteUser: vi.fn(() => Promise.resolve()),
+      useQuota: vi.fn(),
+      countryOf: () => 'US',
+      hitIpLimit: () => true,
+      generate: vi.fn(),
+    } as unknown as Deps
+    const app = createApp(deps)
+
+    expect(await (await req(app, 'GET', '/api/me')).json()).toEqual({ adult: false })
+    expect((await req(app, 'POST', '/api/me/adult')).status).toBe(204)
+    expect(deps.confirmAdult).toHaveBeenCalledWith('u1')
+    expect((await req(app, 'DELETE', '/api/me')).status).toBe(204)
+    expect(deps.deleteUser).toHaveBeenCalledWith('u1')
+
+    for (const [m, p] of [
+      ['GET', '/api/me'],
+      ['POST', '/api/me/adult'],
+      ['DELETE', '/api/me'],
+    ] as const)
+      expect((await req(app, m, p, 'Bearer bad')).status).toBe(401)
+    expect(deps.deleteUser).toHaveBeenCalledTimes(1)
   })
 })

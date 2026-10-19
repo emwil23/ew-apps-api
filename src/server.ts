@@ -35,11 +35,32 @@ const app = createApp({
         issuer: `${env.SUPABASE_URL}/auth/v1`,
         audience: 'authenticated',
       })
-      const meta = payload.user_metadata as { adult?: unknown } | undefined
-      return payload.sub ? { id: payload.sub, adult: meta?.adult === true } : null
+      return payload.sub ? { id: payload.sub } : null
     } catch {
       return null
     }
+  },
+
+  async isAdult(userId) {
+    const res = await supabase
+      .from('profiles')
+      .select('adult_confirmed_at')
+      .eq('id', userId)
+      .maybeSingle()
+    if (res.error) throw res.error
+    return Boolean(res.data?.adult_confirmed_at)
+  },
+
+  async confirmAdult(userId) {
+    const res = await supabase
+      .from('profiles')
+      .upsert({ id: userId, adult_confirmed_at: new Date().toISOString() })
+    if (res.error) throw res.error
+  },
+
+  async deleteUser(userId) {
+    const res = await supabase.auth.admin.deleteUser(userId)
+    if (res.error) throw res.error
   },
 
   async useQuota(userId, appName) {
