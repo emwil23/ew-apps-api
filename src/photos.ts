@@ -244,7 +244,8 @@ export function createPhotoSearch(
       const req = upstreamRequest(source, q, keys)
       const res = await fetchFn(req.url, {
         headers: { ...req.headers, 'User-Agent': UA, Accept: 'application/json' },
-        signal: AbortSignal.timeout(15_000),
+        // Openverse can take ~40s on a query it hasn't cached; Heroku cuts requests at 30s.
+        signal: AbortSignal.timeout(25_000),
       })
       if (res.status === 429) throw new SourceUnavailable(`${source} rate limited`)
       if (!res.ok) throw new Error(`${source} search failed: ${String(res.status)}`)
