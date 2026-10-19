@@ -11,7 +11,7 @@ const env = z
   .object({
     PORT: z.coerce.number().default(8787),
     GEMINI_API_KEY: z.string().min(1),
-    GEMINI_MODEL: z.string().default('gemini-2.5-flash-lite'),
+    GEMINI_MODEL: z.string().default('gemini-3.5-flash-lite'),
     SUPABASE_URL: z.url(),
     SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
     ALLOWED_ORIGINS: z.string().transform((s) => s.split(',').map((o) => o.trim())),
