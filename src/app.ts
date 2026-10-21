@@ -47,6 +47,10 @@ export interface Deps {
   }
   /** A looser per-IP limit for photo search, which needs no sign-in. */
   hitPhotoIpLimit: (ip: string) => boolean
+  /** Adds one view to today's private GitHub profile counter. */
+  countProfileView: () => Promise<void>
+  /** Generous, since GitHub's image proxy shares a few IPs across all visitors. */
+  hitPixelIpLimit: (ip: string) => boolean
 }
 
 // The Gemini free tier may not be used to serve people in the EEA, the UK or Switzerland.
@@ -60,6 +64,10 @@ export const BLOCKED_COUNTRIES = new Set([
 // once) and then a byte at least every 55s, so we send a keep-alive blank line every 10s and stop at 60s.
 const AI_TIMEOUT_MS = 60_000
 const KEEP_ALIVE_MS = 10_000
+
+// A transparent 1x1 image, so the pixel is invisible on the profile.
+const PIXEL =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1"></svg>'
 
 /** Heroku appends the real client address as the last X-Forwarded-For entry; earlier ones can be forged. */
 const clientIp = (header: string | undefined) => header?.split(',').at(-1)?.trim() ?? 'unknown'
@@ -78,6 +86,22 @@ export function createApp(deps: Deps) {
   )
 
   app.get('/health', (c) => c.json({ ok: true }))
+
+  // Private view counter for the owner's GitHub profile README. The image never fails: a broken image
+  // would show on the profile, so a counting error is only logged.
+  app.get('/api/hits/github-profile.svg', async (c) => {
+    if (deps.hitPixelIpLimit(clientIp(c.req.header('x-forwarded-for')))) {
+      await deps.countProfileView().catch((err: unknown) => {
+        console.error('profile view count failed', err)
+      })
+    }
+    // No caching anywhere, so GitHub's camo proxy fetches it again on every profile view.
+    c.header('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0')
+    c.header('Pragma', 'no-cache')
+    c.header('Expires', '0')
+    c.header('Content-Type', 'image/svg+xml')
+    return c.body(PIXEL)
+  })
 
   const userFrom = async (header: string | undefined) => {
     const token = header?.match(/^Bearer (.+)$/)?.[1]

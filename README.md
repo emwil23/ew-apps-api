@@ -59,6 +59,7 @@ sequenceDiagram
 - **The quota is one atomic SQL statement.** `use_ai_quota` upserts and returns the count, so two parallel calls can't both slip under the limit.
 - **The IP limit is in memory.** One dyno means one process. If it ever scales out, move it to Postgres.
 - **Stock photos go through the server.** `GET /api/photos/:source/search` (Unsplash, Pexels, Openverse) keeps the keys off the client and returns one photo shape for all three. Results are cached for an hour in memory: Pexels allows 200 calls an hour and anonymous Openverse 200 a day, shared by every user. Image URLs still point at each source's CDN, as Unsplash requires, and `POST /api/photos/unsplash/download` reports exports to Unsplash.
+- **A private GitHub profile counter.** `GET /api/hits/github-profile.svg` is an invisible 1×1 image in the owner's profile README. Each fetch adds one to today's row in `profile_views` (UTC days, readable only with the service role) and is sent uncached, so GitHub's image proxy fetches it on every profile view. It counts views, not people, and the image never fails: a database error is only logged.
 - **The AI only sees public stock photos.** Pixe's `describe` action takes a photo URL, which must be on `images.unsplash.com`, `images.pexels.com` or Openverse's thumbnail host over https; the server fetches a 512px copy (no redirects) and sends it inline. Users' own uploads never reach the free-tier model.
 - **Daily ping.** Supabase pauses idle free projects, so the server calls `ping()` once a day.
 

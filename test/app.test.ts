@@ -25,6 +25,8 @@ function setup(overrides: Partial<Deps> = {}) {
       trackDownload: vi.fn(() => Promise.resolve()),
     },
     hitPhotoIpLimit: () => true,
+    countProfileView: vi.fn(() => Promise.resolve()),
+    hitPixelIpLimit: () => true,
     ...overrides,
   }
   const app = createApp(deps)
@@ -43,7 +45,7 @@ function setup(overrides: Partial<Deps> = {}) {
       },
       body: JSON.stringify(body),
     })
-  return { deps, call }
+  return { app, deps, call }
 }
 
 describe('POST /api/ai/:app/:action', () => {
@@ -268,5 +270,30 @@ describe('/api/me', () => {
     ] as const)
       expect((await req(app, m, p, 'Bearer bad')).status).toBe(401)
     expect(deps.deleteUser).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('GET /api/hits/github-profile.svg', () => {
+  const get = (app: ReturnType<typeof setup>['app']) =>
+    app.request('/api/hits/github-profile.svg', { headers: { 'x-forwarded-for': '1.2.3.4' } })
+
+  it('counts the view and returns an uncached SVG', async () => {
+    const { app, deps } = setup()
+    const res = await get(app)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('image/svg+xml')
+    expect(res.headers.get('cache-control')).toContain('no-store')
+    expect(await res.text()).toContain('<svg')
+    expect(deps.countProfileView).toHaveBeenCalledOnce()
+  })
+
+  it('still returns the image when counting fails or the IP is over the limit', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const failing = setup({ countProfileView: vi.fn(() => Promise.reject(new Error('db down'))) })
+    expect((await get(failing.app)).status).toBe(200)
+
+    const limited = setup({ hitPixelIpLimit: () => false })
+    expect((await get(limited.app)).status).toBe(200)
+    expect(limited.deps.countProfileView).not.toHaveBeenCalled()
   })
 })

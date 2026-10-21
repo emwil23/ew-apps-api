@@ -85,6 +85,11 @@ const app = createApp({
   countryOf: (ip) => geoip.lookup(ip)?.country,
   hitIpLimit: createIpLimiter(env.AI_IP_LIMIT_PER_MINUTE, 60_000),
   hitPhotoIpLimit: createIpLimiter(env.PHOTO_IP_LIMIT_PER_MINUTE, 60_000),
+  hitPixelIpLimit: createIpLimiter(60, 60_000),
+  async countProfileView() {
+    const res = await supabase.rpc('count_profile_view')
+    if (res.error) throw res.error
+  },
   photos,
   fetchImage: (url) => fetchStockImage(url),
 
