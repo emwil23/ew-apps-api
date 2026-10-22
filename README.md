@@ -50,6 +50,14 @@ sequenceDiagram
   end
 ```
 
+## Apps and their actions
+
+| App                                                   | Live                                                                               | Actions (`POST /api/ai/<app>/<action>`)                                             |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| [TaskPilot](https://github.com/emwil23/taskpilot)     | [taskpilot.ewstudios.workers.dev](https://taskpilot.ewstudios.workers.dev)         | `breakdown`, `plan-day`, `next`, `rewrite`, `review`                                |
+| [Pixe](https://github.com/emwil23/pixe)               | [pixe.ewstudios.workers.dev](https://pixe.ewstudios.workers.dev)                   | `queries`, `describe`, `brief`, `fonts`                                             |
+| [Translate+](https://github.com/emwil23/TranslateApp) | [translateplus.ewstudios.workers.dev](https://translateplus.ewstudios.workers.dev) | `translate`, `alternatives`, `explain`, `transliterate`, `document`, `conversation` |
+
 ## Decisions worth explaining
 
 - **Templates live on the server.** Clients send typed data that zod checks and caps; any other field is dropped. A client can't turn the key into a general chatbot.
@@ -61,6 +69,8 @@ sequenceDiagram
 - **Stock photos go through the server.** `GET /api/photos/:source/search` (Unsplash, Pexels, Openverse) keeps the keys off the client and returns one photo shape for all three. Results are cached for an hour in memory: Pexels allows 200 calls an hour and anonymous Openverse 200 a day, shared by every user. Image URLs still point at each source's CDN, as Unsplash requires, and `POST /api/photos/unsplash/download` reports exports to Unsplash.
 - **A private GitHub profile counter.** `GET /api/hits/github-profile.svg` is an invisible 1×1 image in the owner's profile README. Each fetch adds one to today's row in `profile_views` (UTC days, readable only with the service role) and is sent uncached, so GitHub's image proxy fetches it on every profile view. It counts views, not people, and the image never fails: a database error is only logged.
 - **The AI only sees public stock photos.** Pixe's `describe` action takes a photo URL, which must be on `images.unsplash.com`, `images.pexels.com` or Openverse's thumbnail host over https; the server fetches a 512px copy (no redirects) and sends it inline. Users' own uploads never reach the free-tier model.
+- **Keep-alives stop at the first chunk.** While the model thinks, the server writes a blank line every 10 seconds so Heroku keeps the request open. Readers ignore leading blank lines, but one landing mid-reply would break a translation's line breaks, so they stop as soon as text flows.
+- **Translate+ keeps text and glossary apart.** User text and the glossary go in separate `<data>` blocks and the reply rule comes last: Flash-Lite sometimes answered a single JSON block by echoing it back. The `document` action must return the same number of lines it was given, so the app can map each paragraph back into a Word file.
 - **Daily ping.** Supabase pauses idle free projects, so the server calls `ping()` once a day.
 
 ## Run it
