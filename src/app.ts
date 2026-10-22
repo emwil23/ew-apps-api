@@ -213,10 +213,14 @@ export function createApp(deps: Deps) {
           maxOutputTokens: action.maxOutputTokens,
           signal,
         })
-        // Blank lines are ignored by JSON Lines readers and trimmed from text replies.
+        // Blank lines are ignored by JSON Lines readers and trimmed from the start of text replies. They stop
+        // at the first chunk, so they never land inside a text reply, where line breaks matter.
         const keepAlive = setInterval(() => void stream.write('\n'), KEEP_ALIVE_MS)
         try {
-          for await (const chunk of chunks) await stream.write(chunk)
+          for await (const chunk of chunks) {
+            clearInterval(keepAlive)
+            await stream.write(chunk)
+          }
         } finally {
           clearInterval(keepAlive)
         }
