@@ -57,7 +57,7 @@ sequenceDiagram
 | [TaskPilot](https://github.com/emwil23/taskpilot)     | [taskpilot.ewstudios.workers.dev](https://taskpilot.ewstudios.workers.dev)         | `breakdown`, `plan-day`, `next`, `rewrite`, `review`                                |
 | [Pixe](https://github.com/emwil23/pixe)               | [pixe.ewstudios.workers.dev](https://pixe.ewstudios.workers.dev)                   | `queries`, `describe`, `brief`, `fonts`                                             |
 | [Translate+](https://github.com/emwil23/TranslateApp) | [translateplus.ewstudios.workers.dev](https://translateplus.ewstudios.workers.dev) | `translate`, `alternatives`, `explain`, `transliterate`, `document`, `conversation` |
-| [Willify](https://github.com/emwil23/Willify)         | not deployed yet                                                                   | `vibe`, `refine`, `liner`, `hints`                                                  |
+| [Willify](https://github.com/emwil23/Willify)         | [willify.ewstudios.workers.dev](https://willify.ewstudios.workers.dev)             | `vibe`, `refine`, `liner`, `hints`                                                  |
 
 ## Decisions worth explaining
 
