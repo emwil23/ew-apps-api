@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createApp, type Deps } from '../src/app.js'
 import { createIpLimiter } from '../src/ipLimit.js'
-import { SourceUnavailable } from '../src/photos.js'
+import { SourcePending, SourceUnavailable } from '../src/photos.js'
 
 const validBody = { goal: 'Launch my portfolio site' }
 
@@ -249,6 +249,18 @@ describe('/api/photos', () => {
     expect((await createApp(noKey.deps).request(path)).status).toBe(503)
     const limited = setup({ hitPhotoIpLimit: () => false })
     expect((await createApp(limited.deps).request(path)).status).toBe(429)
+  })
+
+  it('answers 202 while a slow source is still loading', async () => {
+    const slow = setup({
+      photos: {
+        search: () => Promise.reject(new SourcePending('openverse')),
+        trackDownload: vi.fn(),
+      },
+    })
+    const res = await createApp(slow.deps).request('/api/photos/openverse/search?q=x')
+    expect(res.status).toBe(202)
+    expect(await res.json()).toEqual({ photos: [], hasMore: false, pending: true })
   })
 
   it('tracks Unsplash downloads only for Unsplash download URLs', async () => {

@@ -7,6 +7,7 @@ import { apps } from './apps/index.js'
 import {
   searchQuery,
   SOURCES,
+  SourcePending,
   SourceUnavailable,
   isUnsplashDownloadLocation,
   type PhotoPage,
@@ -152,6 +153,9 @@ export function createApp(deps: Deps) {
       return c.json(page)
     } catch (err) {
       if (err instanceof SourceUnavailable) return c.json({ error: 'source_unavailable' }, 503)
+      // Still loading upstream: the client asks again shortly and gets the cached result.
+      if (err instanceof SourcePending)
+        return c.json({ photos: [], hasMore: false, pending: true }, 202)
       console.error('photo search failed', err)
       return c.json({ error: 'upstream_failed' }, 502)
     }
