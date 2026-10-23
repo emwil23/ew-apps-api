@@ -24,6 +24,11 @@ function setup(overrides: Partial<Deps> = {}) {
       search: vi.fn(() => Promise.resolve({ photos: [], hasMore: false })),
       trackDownload: vi.fn(() => Promise.resolve()),
     },
+    places: {
+      search: vi.fn(() => Promise.resolve([])),
+      guide: vi.fn(() => Promise.resolve(null)),
+      climate: vi.fn(() => Promise.resolve([])),
+    },
     music: {
       search: vi.fn(() => Promise.resolve([])),
       lookup: vi.fn(() => Promise.resolve([])),

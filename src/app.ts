@@ -22,6 +22,7 @@ import {
   searchQuery as musicSearchQuery,
   type Music,
 } from './music.js'
+import { climateQuery, guideQuery, placeQuery, PlacesBusy, type Places } from './places.js'
 
 export interface User {
   id: string
@@ -55,6 +56,8 @@ export interface Deps {
   }
   /** Cached iTunes search, lookup and charts (Willify). */
   music: Pick<Music, 'search' | 'lookup' | 'charts'>
+  /** Cached OpenStreetMap search, Wikivoyage guides and NASA climate averages (Natour). */
+  places: Pick<Places, 'search' | 'guide' | 'climate'>
   /** A looser per-IP limit for photo search, which needs no sign-in. */
   hitPhotoIpLimit: (ip: string) => boolean
   /** Adds one view to today's private GitHub profile counter. */
@@ -192,6 +195,39 @@ export function createApp(deps: Deps) {
   app.get(
     '/api/music/charts',
     musicRoute(chartsQuery, (q) => deps.music.charts(q.country), 3600),
+  )
+
+  // Natour's place check, guides and climate. No sign-in, cached; Nominatim's 1 request a second is shared
+  // by every user (see places.ts), so a long queue answers 503 places_busy rather than hitting their limit.
+  const placesRoute =
+    <S extends z.ZodType, T>(schema: S, load: (q: z.infer<S>) => Promise<T>, maxAge: number) =>
+    async (c: Context) => {
+      if (!deps.hitPhotoIpLimit(clientIp(c.req.header('x-forwarded-for'))))
+        return c.json({ error: 'rate_limited' }, 429)
+      const parsed = schema.safeParse(c.req.query())
+      if (!parsed.success)
+        return c.json({ error: 'invalid_input', issues: parsed.error.issues }, 400)
+      try {
+        const value = await load(parsed.data)
+        c.header('Cache-Control', `public, max-age=${String(maxAge)}`)
+        return c.json({ result: value })
+      } catch (err) {
+        if (err instanceof PlacesBusy) return c.json({ error: 'places_busy' }, 503)
+        console.error('places request failed', err)
+        return c.json({ error: 'upstream_failed' }, 502)
+      }
+    }
+  app.get(
+    '/api/places/search',
+    placesRoute(placeQuery, (q) => deps.places.search(q), 86_400),
+  )
+  app.get(
+    '/api/places/guide',
+    placesRoute(guideQuery, (q) => deps.places.guide(q.title), 86_400),
+  )
+  app.get(
+    '/api/places/climate',
+    placesRoute(climateQuery, (q) => deps.places.climate(q.lat, q.lon), 604_800),
   )
 
   // Unsplash asks apps to report each download; the board calls this when a photo is exported.

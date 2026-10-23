@@ -1,3 +1,4 @@
+import { natour } from './natour.js'
 import { pixe } from './pixe.js'
 import { taskpilot } from './taskpilot.js'
 import { translateplus } from './translateplus.js'
@@ -10,4 +11,5 @@ export const apps: Record<string, Record<string, AiAction>> = {
   pixe,
   translateplus,
   willify,
+  natour,
 }

@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { createApp } from './app.js'
 import { createIpLimiter } from './ipLimit.js'
 import { createMusic } from './music.js'
+import { createPlaces } from './places.js'
 import { createPhotoSearch, fetchStockImage } from './photos.js'
 
 const env = z
@@ -95,6 +96,7 @@ const app = createApp({
   },
   photos,
   music: createMusic({ perMinute: env.ITUNES_PER_MINUTE }),
+  places: createPlaces(),
   fetchImage: (url) => fetchStockImage(url),
 
   async *generate({ system, prompt, images = [], maxOutputTokens, signal }) {
