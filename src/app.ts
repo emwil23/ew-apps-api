@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { cors } from 'hono/cors'
 import { secureHeaders } from 'hono/secure-headers'
@@ -14,6 +14,13 @@ import {
   type Source,
 } from './photos.js'
 import { z } from 'zod'
+import {
+  chartsQuery,
+  lookupQuery,
+  MusicBusy,
+  searchQuery as musicSearchQuery,
+  type Music,
+} from './music.js'
 
 export interface User {
   id: string
@@ -45,6 +52,8 @@ export interface Deps {
     search: (source: Source, q: SearchQuery) => Promise<PhotoPage>
     trackDownload: (downloadLocation: string) => Promise<void>
   }
+  /** Cached iTunes search, lookup and charts (Willify). */
+  music: Pick<Music, 'search' | 'lookup' | 'charts'>
   /** A looser per-IP limit for photo search, which needs no sign-in. */
   hitPhotoIpLimit: (ip: string) => boolean
   /** Adds one view to today's private GitHub profile counter. */
@@ -147,6 +156,39 @@ export function createApp(deps: Deps) {
       return c.json({ error: 'upstream_failed' }, 502)
     }
   })
+
+  // iTunes search, lookup and Apple's charts, cached, for Willify. No sign-in. The photo limit is reused: both
+  // are cheap cached reads. Only JSON passes through; previews and artwork load from Apple directly.
+  const musicRoute =
+    <S extends z.ZodType, T>(schema: S, load: (q: z.infer<S>) => Promise<T>, maxAge: number) =>
+    async (c: Context) => {
+      if (!deps.hitPhotoIpLimit(clientIp(c.req.header('x-forwarded-for'))))
+        return c.json({ error: 'rate_limited' }, 429)
+      const parsed = schema.safeParse(c.req.query())
+      if (!parsed.success)
+        return c.json({ error: 'invalid_input', issues: parsed.error.issues }, 400)
+      try {
+        const value = await load(parsed.data)
+        c.header('Cache-Control', `public, max-age=${String(maxAge)}`)
+        return c.json({ results: value })
+      } catch (err) {
+        if (err instanceof MusicBusy) return c.json({ error: 'music_busy' }, 503)
+        console.error('music request failed', err)
+        return c.json({ error: 'upstream_failed' }, 502)
+      }
+    }
+  app.get(
+    '/api/music/search',
+    musicRoute(musicSearchQuery, (q) => deps.music.search(q), 3600),
+  )
+  app.get(
+    '/api/music/lookup',
+    musicRoute(lookupQuery, (q) => deps.music.lookup(q), 3600),
+  )
+  app.get(
+    '/api/music/charts',
+    musicRoute(chartsQuery, (q) => deps.music.charts(q.country), 3600),
+  )
 
   // Unsplash asks apps to report each download; the board calls this when a photo is exported.
   app.post('/api/photos/unsplash/download', bodyLimit({ maxSize: 1024 }), async (c) => {

@@ -6,6 +6,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose'
 import { z } from 'zod'
 import { createApp } from './app.js'
 import { createIpLimiter } from './ipLimit.js'
+import { createMusic } from './music.js'
 import { createPhotoSearch, fetchStockImage } from './photos.js'
 
 const env = z
@@ -24,6 +25,8 @@ const env = z
     UNSPLASH_ACCESS_KEY: z.string().optional(),
     PEXELS_API_KEY: z.string().optional(),
     PHOTO_IP_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(60),
+    // Apple asks for about 20 iTunes Search calls a minute; cached answers don't count.
+    ITUNES_PER_MINUTE: z.coerce.number().int().positive().default(20),
   })
   .parse(process.env)
 
@@ -91,6 +94,7 @@ const app = createApp({
     if (res.error) throw res.error
   },
   photos,
+  music: createMusic({ perMinute: env.ITUNES_PER_MINUTE }),
   fetchImage: (url) => fetchStockImage(url),
 
   async *generate({ system, prompt, images = [], maxOutputTokens, signal }) {

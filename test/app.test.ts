@@ -24,6 +24,11 @@ function setup(overrides: Partial<Deps> = {}) {
       search: vi.fn(() => Promise.resolve({ photos: [], hasMore: false })),
       trackDownload: vi.fn(() => Promise.resolve()),
     },
+    music: {
+      search: vi.fn(() => Promise.resolve([])),
+      lookup: vi.fn(() => Promise.resolve([])),
+      charts: vi.fn(() => Promise.resolve([])),
+    },
     hitPhotoIpLimit: () => true,
     countProfileView: vi.fn(() => Promise.resolve()),
     hitPixelIpLimit: () => true,
