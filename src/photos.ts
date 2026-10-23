@@ -160,6 +160,9 @@ export interface PhotoKeys {
 
 export class SourceUnavailable extends Error {}
 
+/** The source is still answering; its result will be cached, so the same search a little later is instant. */
+export class SourcePending extends Error {}
+
 /** Builds the upstream request for a search. Exported so the URL rules can be tested without the network. */
 export function upstreamRequest(source: Source, q: SearchQuery, keys: PhotoKeys) {
   const params = new URLSearchParams({ page: String(q.page) })
@@ -231,9 +234,28 @@ export function createPhotoSearch(
   fetchFn: typeof fetch = fetch,
   ttlMs = 60 * 60 * 1000,
   now = Date.now,
+  /** How long a request waits before answering "pending". Heroku cuts requests off at 30s. */
+  waitMs = 20_000,
 ) {
   const cache = new Map<string, { at: number; value: PhotoPage }>()
+  // Searches still running upstream, so a retry joins the same call instead of starting another.
+  const inflight = new Map<string, Promise<PhotoPage>>()
   const MAX = 500
+
+  async function fetchPage(source: Source, q: SearchQuery, key: string): Promise<PhotoPage> {
+    const req = upstreamRequest(source, q, keys)
+    const res = await fetchFn(req.url, {
+      headers: { ...req.headers, 'User-Agent': UA, Accept: 'application/json' },
+      // Openverse can take ~40s on a query it hasn't cached; keep going after the request has answered.
+      signal: AbortSignal.timeout(90_000),
+    })
+    if (res.status === 429) throw new SourceUnavailable(`${source} rate limited`)
+    if (!res.ok) throw new Error(`${source} search failed: ${String(res.status)}`)
+    const value = parseUpstream(source, await res.json(), q.page)
+    if (cache.size >= MAX) cache.delete(cache.keys().next().value ?? '')
+    cache.set(key, { at: now(), value })
+    return value
+  }
 
   return {
     async search(source: Source, q: SearchQuery): Promise<PhotoPage> {
@@ -241,19 +263,24 @@ export function createPhotoSearch(
       const hit = cache.get(key)
       if (hit && now() - hit.at < ttlMs) return hit.value
 
-      const req = upstreamRequest(source, q, keys)
-      const res = await fetchFn(req.url, {
-        headers: { ...req.headers, 'User-Agent': UA, Accept: 'application/json' },
-        // Openverse can take ~40s on a query it hasn't cached; Heroku cuts requests at 30s.
-        signal: AbortSignal.timeout(25_000),
+      let running = inflight.get(key)
+      if (!running) {
+        running = fetchPage(source, q, key).finally(() => inflight.delete(key))
+        // A search nobody waits for any more must not crash the process when it fails.
+        running.catch(() => undefined)
+        inflight.set(key, running)
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const pending = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new SourcePending(source))
+        }, waitMs)
       })
-      if (res.status === 429) throw new SourceUnavailable(`${source} rate limited`)
-      if (!res.ok) throw new Error(`${source} search failed: ${String(res.status)}`)
-      const value = parseUpstream(source, await res.json(), q.page)
-
-      if (cache.size >= MAX) cache.delete(cache.keys().next().value ?? '')
-      cache.set(key, { at: now(), value })
-      return value
+      try {
+        return await Promise.race([running, pending])
+      } finally {
+        clearTimeout(timer)
+      }
     },
 
     async trackDownload(downloadLocation: string): Promise<void> {

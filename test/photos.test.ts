@@ -3,6 +3,7 @@ import {
   createPhotoSearch,
   fetchStockImage,
   fromOpenverse,
+  SourcePending,
   isStockImageUrl,
   upstreamRequest,
   type SearchQuery,
@@ -73,6 +74,24 @@ describe('createPhotoSearch', () => {
       downloadLocation: 'https://api.unsplash.com/photos/abc/download',
     })
     await photos.search('unsplash', q())
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('answers pending for a slow source, then serves the result it kept loading', async () => {
+    let finish: (r: Response) => void = () => undefined
+    const fetchFn = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve
+        }),
+    )
+    const photos = createPhotoSearch({ unsplash: 'k' }, fetchFn, 60_000, Date.now, 20)
+    await expect(photos.search('unsplash', q())).rejects.toBeInstanceOf(SourcePending)
+    // A retry while it is still loading joins the same upstream call.
+    await expect(photos.search('unsplash', q())).rejects.toBeInstanceOf(SourcePending)
+    finish(Response.json(unsplashJson))
+    await new Promise((r) => setTimeout(r, 0))
+    expect((await photos.search('unsplash', q())).photos).toHaveLength(1)
     expect(fetchFn).toHaveBeenCalledTimes(1)
   })
 
